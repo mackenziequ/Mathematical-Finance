@@ -1,0 +1,62 @@
+```{r}
+bond_ytm<-bond%>%pivot_wider(names_from = date, values_from=ytm)
+
+Jan_10<-tibble("term_to_mat"=bond$term_to_maturity, "ytm_10" = bond_ytm$`1/10/2022`)%>%drop_na()
+
+Jan_11<-tibble("term_to_mat"=bond$term_to_maturity, "ytm_11" = bond_ytm$`1/11/2022`)%>%drop_na()
+
+Jan_12<-tibble("term_to_mat"=bond$term_to_maturity, "ytm_12" = bond_ytm$`1/12/2022`)%>%drop_na()
+
+Jan_13<-tibble("term_to_mat"=bond$term_to_maturity, "ytm_13" = bond_ytm$`1/13/2022`)%>%drop_na()
+
+Jan_14<-tibble("term_to_mat"=bond$term_to_maturity, "ytm_14" = bond_ytm$`1/14/2022`)%>%drop_na()
+
+Jan_17<-tibble("term_to_mat"=bond$term_to_maturity, "ytm_17" = bond_ytm$`1/17/2022`)%>%drop_na()
+
+Jan_18<-tibble("term_to_mat"=bond$term_to_maturity, "ytm_18" = bond_ytm$`1/18/2022`)%>%drop_na()
+
+Jan_19<-tibble("term_to_mat"=bond$term_to_maturity, "ytm_19" = bond_ytm$`1/19/2022`)%>%drop_na()
+
+Jan_20<-tibble("term_to_mat"=bond$term_to_maturity, "ytm_20" = bond_ytm$`1/20/2022`)%>%drop_na()
+
+Jan_21<-tibble("term_to_mat"=bond$term_to_maturity, "ytm_21" = bond_ytm$`1/21/2022`)%>%drop_na()
+
+
+Jan<-merge(Jan_10,Jan_11,by="term_to_mat")
+
+Jan<-merge(Jan,Jan_12,by="term_to_mat")
+Jan<-merge(Jan,Jan_13,by="term_to_mat")
+Jan<-merge(Jan,Jan_14,by="term_to_mat")
+Jan<-merge(Jan,Jan_17,by="term_to_mat")
+Jan<-merge(Jan,Jan_18,by="term_to_mat")
+Jan<-merge(Jan,Jan_19,by="term_to_mat")
+Jan<-merge(Jan,Jan_20,by="term_to_mat")
+Jan<-merge(Jan,Jan_21,by="term_to_mat")
+```
+
+
+
+
+
+5 Calculate the forward rate for each bond i at each day t.
+```{r}
+# Calculate the column f_i at each day t.
+t = 1
+term = selected_bonds[["Term(M)"]]/12
+while (t <= 10) {
+  f_i = c()
+  r_year1_hat = (selected_bonds[[paste("r", toString(t), sep="")]][2] + selected_bonds[[paste("r", toString(t), sep="")]][3])/2
+  
+  # Calculate the element f at each day t.
+  i = 1
+  while (i <= 11) {
+    f = ( selected_bonds[[paste("r", toString(t), sep="")]][i] * (term[i] - today[t]/360) - r_year1_hat * (1 - today[t]/360) ) / (term[i]-1)
+    f_i = append(f_i, f)
+    
+    i = i + 1
+  }
+    
+  colname_f = paste("f", toString(t), sep="")
+  selected_bonds[[colname_f]] = f_i
+  t= t + 1
+}

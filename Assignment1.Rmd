@@ -1,0 +1,349 @@
+---
+title: "Assignment 1"
+output: 
+  bookdown::pdf_document2:
+    toc: false
+bibliography: references.bib
+author: Mackenzie(Huining) Qu
+---
+
+```{r setup, echo=FALSE, message=FALSE, warning=FALSE}
+knitr::opts_chunk$set(echo = FALSE,warning = FALSE)
+library(tidyverse)
+# for time clean up
+library(chron)
+library(knitr)
+library(ggplot2)
+library(kableExtra)
+# file includes bond name, coupon, ISIN, issue date, maturity date, 
+# and 10 days of quoted price from Jan10th-Jan24th
+data<-read.csv("Data/CanadianGovernmentBond.csv")
+```
+
+```{r clean data}
+# round the maturity date to nearest month for convenient calculation of yield
+# note all maturity date at the end of the month
+data <- data %>% 
+  mutate(maturity = chron(chron(as.character(Maturity.Dtae)), format = c(dates = "mon year")))
+
+# change the coupon to decimal only
+data <- data %>%
+  mutate(Coupon = as.numeric(strsplit(as.character(Coupon), "%")))
+
+data <- data %>%filter(Coupon <=2)
+
+# select 11 bonds 6 months apart in order to construct a 0-5 years yield curve
+bond <- data[c(13,18,21,22,25,23,4,5,7,8,10),]
+
+# change col names
+colnames(bond) <- c("Name", "Coupon", "ISIN", "Issue.date", "Maturity.date", "1/10/2022", "1/11/2022", "1/12/2022", "1/13/2022", "1/14/2022", "1/17/2022", "1/18/2022", "1/19/2022", "1/20/2022", "1/21/2022", "maturity")
+
+# change name to 'CAN + "coupon" + "maturity"' 
+# ie(“CAN 2.5 Jun 24” refers to the Canadian Government bond with a maturity 
+# in June 24 and a coupon of 2.5)
+bond <- bond %>%
+  mutate(fullname = paste("CAN", as.character(Coupon),as.character(maturity)))
+# Add term to maturity for cash flow vector
+bond <- bond %>% mutate(term_to_maturity = c(0,1,2,3,4,5,6,7,8,9,10))
+
+```
+
+# Fundamental Questions
+## 1.
+### (a) 
+When governments need money, they would issue bonds as a way to "borrow" money with a fixed maturity, thus eliminates the possible inflation caused by printing more money.
+
+### (b)
+A yield curve might appear to flatten in the long term when, for example, it yields 4\% on a 5 year bond, and 4.3\% on a 10 year bond.
+
+### (c)
+Quantitative easing is when a nation's central bank purchases long term securities to inject money back to the economy to lower the interest rates and stabilizes inflation, for example, in response of COVID, the Fed(Federal Reserve) bought \$500 billion in Treasury securities and \$200 billion in government-guaranteed mortgage-backed securities in order to stimulate the economy.
+
+    
+## 2.
+The 11 bonds we have chosen are: "CAN 0.5 Feb22", "CAN 0.25 Jul22", "CAN 0.25 Apr23", "CAN 0.25 Jul23", "CAN 0.75 Jan24", "CAN 7.5 Sep24", "CAN 1.25 Feb25", "CAN 0.5 Aug25", "CAN 0.25 Feb26", "CAN 1 Aug26", "CAN 1.25 Feb27". We have selected these 11 bonds to construct a "0-5 year" yield and spot curve as the 11 bonds have maturity date in half year intervals. Moreover, the bonds have similar lower coupons, guaranteeing the consistency when constructing the curves.
+
+```{r}
+knitr::kable(bond[1:5], "simple", caption = "11 Selected Bonds")%>%
+  kable_styling(latex_options = "HOLD_position")
+```
+
+## 3. 
+If we have several stochastic processes for which each process represents a unique point along a stochastic curve (assume points/processes are evenly distributed along the curve), we can look at the eigenvalues and the eigen vectors of the associated co-variance matrix to find out which linear combination of the stochastic processes gives us the most information. The diagonal matrix of descending eigenvalues projects the linear combination of the variance of the stochastic processes onto higher dimensions, each uncorrelated. The largest eigenvalue denotes the linear combination that explains the highest proportion of the variance, and vise versa. We can then reduce the dimension of the stochastic process with the corresponding eigenvalues that gives us the most information.
+
+
+# Empirical Questions
+
+## Assumptions{#ass}
+
+```{r tidy data}
+# tidy data
+bond <- bond %>% pivot_longer(c("1/10/2022", "1/11/2022", "1/12/2022", "1/13/2022", "1/14/2022", "1/17/2022", "1/18/2022", "1/19/2022", "1/20/2022", "1/21/2022"), names_to = "date", values_to = "yield")
+```
+
+The bonds data is from Business Insider website[@bonds]
+
+It is assumed that time follows actual/365 format. The data is cleaned such that each row contains the one observation of each bond. Table \@ref(tab:bond) provides a glimpse of our cleaned data. 
+
+
+
+```{r bond}
+head(bond)%>%
+  knitr::kable(caption = "Head of cleaned bond data")%>%
+  kable_styling(latex_options = "HOLD_position")
+```
+
+The data cleaning process is done with tidyverse[@tidyverse] package, and the manipulation of time is done with chron[@chron] package.
+
+In the following section, each bond i on the j-th observation date is denoted as [$bond_{ij}$](#ass)
+
+To review the code or replicate this process, view [github](https://github.com/mackenziequ/Mathematical-Finance)
+
+```{r yield curve}
+# Day count convention of actual/365
+### get dirty price
+## first get accrued interest
+# AI= n/365*coupon, with n being the number of days since the last coupon payment
+
+# find when coupon was paid in 2021, if no coupon paid then use issue date
+bond <- bond %>%
+  mutate(coupon_payment_21 = case_when(
+    chron(date)-chron(as.character(Issue.date)) < 182 ~ substr(Issue.date,1,8),
+    chron(date)-chron(as.character(Issue.date)) >= 182 ~ substr(Maturity.date,1,7))
+  )
+           
+
+bond <- bond %>%
+  mutate(yr = "21")
+
+bond <- bond%>%unite("coupon_payment_21", coupon_payment_21:yr, sep="")
+
+bond <- bond %>% mutate(coupon_payment_21 = case_when(
+  chron(date)-chron(coupon_payment_21) > 182 ~ chron(coupon_payment_21)+182,
+  chron(date)-chron(coupon_payment_21) <= 182 ~ chron(coupon_payment_21)
+  ))
+
+
+# add n to data
+bond <- bond %>% mutate(n = as.numeric(chron(date)-chron(coupon_payment_21)))
+
+## AI ###FINALLY 
+bond <- bond %>% mutate(AI = n/365*Coupon)
+## Dirty price
+bond <- bond %>% mutate(DP = AI+yield)
+##
+```
+
+## 4
+### (a) Yield Curve
+
+To construct the YTM curve for the 11 bonds, we first need the dirty price of $bond_{ij}$ with the formula:
+$$AI_{ij} = \frac{n_j}{365}*Coupon$$
+$$DP_{ij} = AI_{ij}+yield_{ij}$$
+where n denotes the number of days since the last coupon payment. 
+
+The process below follows datacamp tutorial[@datacamp], using uniroot function to fins YTM.
+
+1. define cash flow vector for each $bond_{ij}$ as $c(DP_{ij},Coupon_i,\cdots,FV_i)$, where $FV_i=100+Coupon_i/2$.
+
+2. create bond valuation function that uses the cash flow vector.
+
+3. use uniroot[@base_r] function to find YTM, within the interval c(0,1).
+
+
+```{r, warning=FALSE}
+### YTM
+# future value
+bond <- bond %>% mutate(FV = 100+Coupon/2)
+
+# selected bonds in half year interval, we estimate cash flow vector
+cashf <- function(dirty_price, coupon, term_to_maturity, future_value){
+  cf = rep(coupon, term_to_maturity+2)
+  cf[1] = -dirty_price
+  cf[term_to_maturity+2] = future_value
+  return(cf)
+}
+
+# Create bond valuation function
+bval <- function(i, cf,
+     t=seq(along = cf))
+     sum(cf / (1 + i)^t)
+
+# Create ytm() function using uniroot
+ytm <- function(cf) {
+    uniroot(bval, c(0, 1), cf = cf)$root
+}
+
+for (i in 1:length(bond$date)){bond$ytm[i]=
+  ytm(cashf(bond$DP[i],bond$Coupon[i],bond$term_to_maturity[i],bond$FV[i]))}
+```
+
+Figure \@ref(fig:ytmplot) shows the 5-year yield curve on each day, using ggplot2 package[@ggplot]
+
+```{r ytmplot, fig.cap="5-Year Yield Curve", fig.dim=c(7,4)}
+bond<- bond%>%mutate(
+  year=term_to_maturity/2
+)
+
+# plot ytm
+bond%>%ggplot(aes(x=year,y=ytm))+
+  geom_line(aes(group=date, colour=date))+
+  geom_point(aes(colour=date), size=0.8)+
+  theme_minimal()+
+  ylim(0.0,0.015)
+```
+
+### Spot Curve
+
+The method of bootstrapping is used to calculate the short rate of $bond_{ij}$. The general formula to solve for the short rate of bond i on j-th day, $r_ij$ is $$DP_{ij}=\frac{1}{2}Coupon_i\cdot e^{-r_{1j}\cdot t_{1j}}+\sum_{k=2}^{i-1} \frac{1}{2}Coupon_i\cdot e^{-r_{kj}\cdot t_{kj}}+FV_{ij}\cdot e^{-r_{ij}\cdot t_{ij}}$$ , where $t_{ij}$ denotes the time to maturity in years for [$bond_{ij}$](#ass).
+
+The process is as follows:
+
+1. Use  “CAN 0.5 Feb22”, the zero-coupon bond matures in less than half a year to find the yield with $$r_1(t_j)=-\frac{log(DP_{1j}/FV_1j)}{t_j}$$
+
+2. Looping through the data for each observation $date_j$ using the previous calculated $r_{(1:i-1)j}$, $r_ij$ is found by solving the formula above.
+
+The 5-year spot curve is plotted in Figure \@ref(fig:spotplot).
+
+```{r,warning=FALSE}
+bond <- bond %>% 
+  mutate(ttm=
+           (as.numeric(
+             chron(as.character(bond$Maturity.date))-
+               chron(bond$date)))/365)
+
+
+## Apparently R doesnt have += like python
+## so lets define it
+cumsum = function(x1,x2) eval.parent(substitute(x1<-x1+x2))
+
+## short rate with bootstrapping
+for (i in 1:10){
+  bond$r[i]=-log(bond$DP[i]/bond$FV[i])/bond$ttm[i]
+  prev = bond$Coupon[i]/2*exp(-bond$r[i]*bond$ttm[i])
+  for (j in 1:10){
+    bond$r[i+10*j]=-log((bond$DP[i+10*j]-prev)/bond$FV[i+10*j])/bond$ttm[i+10*j]
+    perv = cumsum(prev, (bond$Coupon[i+10*j]/2*exp(-bond$r[i+10*j]*bond$ttm[i+10*j])))
+  }
+}
+### fix
+#-log((bond$DP[11]-bond$Coupon[11]/2*exp(-r1*bond$ttm[1]))/bond$FV[11])/bond$ttm[11]
+```
+
+
+```{r spotplot, fig.cap="5-Year Spot Curve", fig.dim=c(7,4)}
+# plot spot rate
+bond%>%ggplot(aes(x=year,y=r))+
+  geom_line(aes(group=date, colour=date))+
+  geom_point(aes(colour=date), size=0.8)+
+  theme_minimal()+
+  ylim(0.0,0.03)
+```
+
+### Forward Rate
+
+The 1-year forward rate can be derived from the spot rate, for k=2,...5, with the formula $f_{kj}=\frac{r_{kj}\cdot (T_k-t_j)-r_{1j}\cdot (T_1-t_j)}{T_k-T_1}$, where $T_1=1$.
+
+1. The bond data is filtered to contain bonds with only full year interval, ie. k=1,2,3,4,5. 
+
+2. Define the 1-yr $T_1$ and loop through $bond_{kj}$, giving the 1yr-yr to 1-yr-4yr forward rate.
+
+```{r}
+bond$forward = 0
+
+for (i in 2:5){
+  for (j in 1:10){
+    r_1j = bond$r[20+j]
+    r_ij = bond$r[20*i+j]
+    t_j = bond$date[j]
+    T_i = bond$Maturity.date[i*20+1]
+    T_1 = bond$Maturity.date[21]
+    bond$forward[20*i+j] = 
+      (r_ij*(as.numeric(chron(as.character(T_i))-chron(t_j))/365)-
+      r_1j*(as.numeric(chron(as.character(T_1))-chron(t_j))/365))/
+      (as.numeric(chron(as.character(T_i))-chron(as.character(T_1)))/365)
+  }
+}
+
+
+forward_data<- bond%>% filter(forward != 0.0)
+```
+
+The 1-year forward curve with terms ranging from 2-5 years is plotted in Figure \@ref(fig:forplot).
+
+```{r forplot, fig.cap="1-Year Forward Curve", fig.dim=c(7,4)}
+# plot forward
+forward_data%>%ggplot(aes(x=year,y=forward))+
+  geom_line(aes(group=date, colour=date))+
+  geom_point(aes(colour=date), size=0.8)+
+  theme_minimal()+
+  ylim(0.0,0.03)
+```
+
+
+## 5
+
+The daily log-returns of yield's covariance matrix of each full year interval $bond_{(1:5)j}$ is plotted in table \@ref(tab:covyield), and similarly, the forward rates's covariance matrix is shown in table \@ref(tab:covfor).
+
+
+```{r covyield}
+year_data <- bond %>% filter(year==1|year==2|year==3|year==4|year==5)
+
+
+yield = matrix(nrow=9,ncol = 5)
+
+for (i in 1:5){
+  for (j in 1:9){
+    yield[j,i]=log(year_data$ytm[(i-1)*10+j+1]/year_data$ytm[(i-1)*10+j])
+  }
+}
+
+as.data.frame(cov(yield))%>%
+  knitr::kable(caption = "Covariance Matrix of daily log return of Yield")%>%
+  kable_styling(latex_options = "HOLD_position")
+
+```
+
+
+```{r covfor}
+forward = matrix(nrow = 9, ncol=4)
+
+for (i in 1:4){
+  for (j in 1:9){
+    forward[j,i]=
+      log(forward_data$forward[(i-1)*10+j+1]/forward_data$forward[(i-1)*10+j])
+  }
+}
+
+as.data.frame(cov(forward))%>%
+  knitr::kable(caption = "Covariance Matrix of daily log return of Forward Rate")%>%
+  kable_styling(latex_options = "HOLD_position")
+
+```
+
+## 6
+
+Table \@ref(tab:eigeny) and table \@ref(tab:eigenf) provides the eigen vectors and values for the covariance matrix of daily log return of yield and forward rate respectively. The largest eigen value and its corresponding eigen vector in each table provides the direction of the largest variability, it essentially is the first coomponent of PCA.
+
+```{r eigeny}
+rbind(c("Eigen Value 1","Eigen Value 2","Eigen Value 3","Eigen Value 4","Eigen Value 5"),eigen(cov(yield))$value,c("Eigen Vector 1","Eigen Vector 2","Eigen Vector 3","Eigen Vector 4","Eigen Vector 5"),eigen(cov(yield))$vector)%>%
+  knitr::kable(caption = "Eigen Values of Covariance Matrix of daily log return of Yield")%>%
+  kable_styling(latex_options = "HOLD_position")
+
+```
+
+```{r eigenf}
+rbind(c("Eigen Value 1","Eigen Value 2","Eigen Value 3","Eigen Value 4"),eigen(cov(forward))$value,c("Eigen Vector 1","Eigen Vector 2","Eigen Vector 3","Eigen Vector 4"),eigen(cov(forward))$vector)%>%
+  knitr::kable(caption = "Eigen Values of Covariance Matrix of daily log return of Forward rate")%>%
+  kable_styling(latex_options = "HOLD_position")
+
+```
+
+
+# Reference
+
+
+
+
+
+
